@@ -1,56 +1,71 @@
-const express = require("express");
-const axios = require("axios");
-const { updateWindow } = require("./windowManager");
+const express = require('express');
+const axios = require('axios');
+require('dotenv').config();
 
 const app = express();
 const PORT = 9876;
 const WINDOW_SIZE = 10;
-let numberWindow = [];
 
-const idMap = {
-  p: "primes",
-  f: "fibo",
-  e: "even",
-  r: "rand"
+let slidingWindow = [];
+
+const API_URLS = {
+  p: 'http://20.244.56.144/evaluation-service/primes',
+  f: 'http://20.244.56.144/evaluation-service/fibo',
+  e: 'http://20.244.56.144/evaluation-service/even',
+  r: 'http://20.244.56.144/evaluation-service/rand'
 };
 
-app.get("/numbers/:numberid", async (req, res) => {
+app.get('/numbers/:numberid', async (req, res) => {
   const { numberid } = req.params;
-  const apiType = idMap[numberid];
+  const apiUrl = API_URLS[numberid];
 
-  if (!apiType) {
-    return res.status(400).json({ error: "Invalid number ID" });
+  if (!apiUrl) {
+    return res.status(400).json({ error: 'Invalid number ID' });
   }
 
-  const prevWindow = [...numberWindow];
-  const url = `http://20.244.56.144/evaluation-service/${apiType}`;
-
-  let numbers = [];
+  const windowPrevState = [...slidingWindow];
+  let fetchedNumbers = [];
 
   try {
-    const response = await axios.get(url, { timeout: 500 });
-    numbers = response.data.numbers || [];
+    const response = await axios.get(apiUrl, {
+      timeout: 500, // reject slow responses
+      headers: {
+        Authorization: process.env.TOKEN
+      }
+    });
+
+    fetchedNumbers = response.data.numbers || [];
+
+    // Add unique numbers to the window
+    for (let num of fetchedNumbers) {
+      if (!slidingWindow.includes(num)) {
+        slidingWindow.push(num);
+        if (slidingWindow.length > WINDOW_SIZE) {
+          slidingWindow.shift(); // Remove oldest
+        }
+      }
+    }
   } catch (error) {
-    console.warn("Error fetching numbers or timeout");
+    console.error('Error fetching numbers:', error.message);
+    // Proceed with current window state even if fetch fails
   }
 
-  numberWindow = updateWindow(numberWindow, numbers, WINDOW_SIZE);
-
   const avg =
-    numberWindow.length > 0
-      ? parseFloat(
-          (numberWindow.reduce((a, b) => a + b, 0) / numberWindow.length).toFixed(2)
-        )
+    slidingWindow.length > 0
+      ? (
+          slidingWindow.reduce((sum, val) => sum + val, 0) /
+          slidingWindow.length
+        ).toFixed(2)
       : 0;
 
-  res.json({
-    windowPrevState: prevWindow,
-    windowCurrState: numberWindow,
-    numbers,
-    avg
+  return res.json({
+    windowPrevState,
+    windowCurrState: slidingWindow,
+    numbers: fetchedNumbers,
+    avg: parseFloat(avg)
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`✅ Average Calculator Microservice running on http://localhost:${PORT}`);
 });
